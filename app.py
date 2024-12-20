@@ -1,7 +1,3 @@
-from flask import Flask, render_template, request, redirect, url_for, send_from_directory, jsonify
-from parser import parse_resume, save_parsed_data
-from scraper import main as scrape_jobs
-from matcher import main as match_jobs, save_resume_embedding
 import os
 import openai
 import re
@@ -9,6 +5,14 @@ import markdown
 import json
 import threading
 import pandas as pd
+from flask import Flask, render_template, request, redirect, url_for, send_from_directory, jsonify
+from parser import parse_resume, save_parsed_data
+from scraper import main as scrape_jobs
+from matcher import main as match_jobs, save_resume_embedding
+from geopy.geocoders import Nominatim
+from geopy.distance import geodesic
+from geopy.exc import GeocoderTimedout
+from time import sleep
 
 app = Flask(__name__)
 
@@ -78,7 +82,8 @@ def preferences_page():
                 if os.path.exists(scraped_jobs_file):
                     ranked_jobs = match_jobs(resume_json_path=parsed_resume_file, jobs_csv_path=scraped_jobs_file)
                     if ranked_jobs is not None:
-                        filtered_jobs = ranked_jobs[ranked_jobs['location'].str.contains(job_location, case=False, na=False)]
+                        # Filter top 10 jobs with proximity-based matching
+                        filtered_jobs = filter_jobs_by_proximity(ranked_jobs, job_location).to_dict(orient='records')
                         top_jobs = filtered_jobs.head(10).to_dict(orient='records')
                         pd.DataFrame(top_jobs).to_json(top_jobs_file, orient="records")
                     status["matching_complete"] = True
@@ -197,6 +202,7 @@ def replace_resume():
             if os.path.exists(scraped_jobs_file):
                 ranked_jobs = match_jobs(resume_json_path=parsed_resume_file, jobs_csv_path=scraped_jobs_file)
                 if ranked_jobs is not None:
+                    
                     top_jobs = ranked_jobs.head(10).to_dict(orient='records')
                     pd.DataFrame(top_jobs).to_json(top_jobs_file, orient="records")
                 status["matching_complete"] = True
@@ -365,6 +371,62 @@ def extract_job_and_location(user_message):
         print(f"Error extracting job and location: {e}")
         return "default", "default"
 
+def get_coordinates(location_name, max_retries = 3, retry_delay = 2):
+    # Get the latitude and longitude for a given location name using Nominatim
+    geolocator = Nominatim(user_agent = "job_locator")
+    retries = 0
+
+    while retries < max_retries:
+        try:
+            location = geolocator.geocode(location_name, timeout = 5)
+            if location:
+                return (location.latitude, location.longitude)
+            else:
+                print(f"Geocoding failed for '{location_name}' (no results)")
+                return None
+        except GeocoderTimedout:
+            retries += 1
+            print(f"Timeout error while geocoding '{location_name}'. Retrying {retries}/{max_retries}...")
+            sleep(retry_delay)
+        except Exception as e:
+            print(f'Error in geocoding the location {location_name}')
+            break
+    print(f"Failed to geocode '{location_name}' after {max_retries} retries.")
+    return None
+
+def filter_jobs_by_radius(jobs_df, latitude, longitude, radius_miles):
+    # Compute distance for each job and filter
+    def within_radius(job_location):
+        job_coords = get_coordinates(job_location)
+        if not job_coords:
+            return False
+        distance = geodesic((latitude, longitude), job_coords).miles
+        return distance <= radius_miles
+
+    # Apply filtering logic
+    jobs_df['within_radius'] = jobs_df['location'].apply(within_radius)
+    filtered_jobs = jobs_df[jobs_df['within_radius']]
+
+    if filtered_jobs.empty:
+        print(f"No jobs found within {radius_miles} miles. Returning top 10 jobs.")
+        return jobs_df.head(min(20, len(jobs_df)))  # Return top jobs if none found within radius
+
+    print(f"Found {len(filtered_jobs)} jobs within {radius_miles} miles.")
+    return filtered_jobs.head(20)
+
+def filter_jobs_by_proximity(jobs_df, user_location, radius_miles=25):
+    #  Filter jobs based on their proximity to the user's location.
+    user_coords = get_coordinates(user_location)
+    print(f"User coordinates for '{user_location}': {user_coords}")
+
+    if user_coords: # if geocoding succeeds
+        latitude, longitude = user_coords
+        print(f"Geocoded '{user_location}' to coordinates: ({latitude}, {longitude})")
+        return filter_jobs_by_radius(jobs_df, latitude, longitude, radius_miles)
+    else: # Fallback for geocoding failure
+        print("Unable to get coordinates for the specified location. Returning all jobs.")
+        return jobs_df
+
 def update_scraper_and_matcher(job_role, location):
     try:
         # Reset status flags
@@ -377,25 +439,42 @@ def update_scraper_and_matcher(job_role, location):
             try:
                 # Scrape jobs
                 print(f"Scraping jobs for role: {job_role} in location: {location}")
-                scrape_jobs(search_term=job_role, location=location)
+                new_jobs = scrape_jobs(search_term=job_role, location=location)
                 status["scraping_complete"] = True
 
-                # Run matcher to find top jobs
-                if os.path.exists(scraped_jobs_file):
-                    ranked_jobs = match_jobs(resume_json_path=parsed_resume_file, jobs_csv_path=scraped_jobs_file)
-                    print("The ranked jobs are: ", ranked_jobs.head(5))
-
-                    if ranked_jobs is not None:
-                        # Filter top 10 jobs from the requested location
-                        filtered_jobs = ranked_jobs[ranked_jobs['location'].str.contains(location, case=False, na=False)]
-                        print("The filtered jobs are: ", filtered_jobs.head(5))
-                        top_jobs = filtered_jobs.head(10).to_dict(orient='records')
-
-                        archive_old_top_jobs()
-                        save_top_jobs(top_jobs=top_jobs)
-                        print("Top jobs updated and old jobs archived.")
-
+                if not new_jobs:
+                    print("No new jobs found.")
                     status["matching_complete"] = True
+                    return
+
+                # Run matcher on only new jobs
+                print(f"Matching {len(new_jobs)} new jobs... ")
+                new_jobs_df = pd.DataFrame(new_jobs)
+                ranked_new_jobs = match_jobs(resume_json_path=parsed_resume_file, new_jobs=new_jobs_df)
+
+                # Filter top jobs with proximity
+                filtered_jobs = filter_jobs_by_proximity(ranked_new_jobs, location).head(10).to_dict(orient='records')
+
+                # Archive old top jobs and save new top jobs
+                archive_old_top_jobs()
+                save_top_jobs(top_jobs=filtered_jobs)
+                print("Top jobs updated and old jobs archived.")
+
+                # # Run matcher to find top jobs
+                # if os.path.exists(scraped_jobs_file):
+                #     ranked_jobs = match_jobs(resume_json_path=parsed_resume_file, jobs_csv_path=scraped_jobs_file)
+                    # print("The ranked jobs are: ", ranked_jobs.head(5))
+
+                    # if ranked_jobs is not None:
+                    #     # Filter top 10 jobs with proximity-based matching
+                    #     filtered_jobs = filter_jobs_by_proximity(ranked_jobs, location).to_dict(orient='records')
+                    #     top_jobs = filtered_jobs.head(10).to_dict(orient='records')
+
+                    #     archive_old_top_jobs()
+                    #     save_top_jobs(top_jobs=top_jobs)
+                    #     print("Top jobs updated and old jobs archived.")
+
+                status["matching_complete"] = True
             except Exception as e:
                 print(f"Error in scrape_and_match: {e}")
 

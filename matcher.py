@@ -72,26 +72,27 @@ def hash_job(job):
     """Generate a unique identifier for a job using its URL or title and company."""
     return f"{job['title']}_{job['company']}".lower().replace(" ", "_")
 
-def embed_new_jobs(jobs_df, stored_embeddings, text_column="description"):
-    """Embed only new jobs that are not already in stored_embeddings."""
+
+
+def embed_new_jobs(jobs_df, stored_embeddings):
+    """Generate embeddings only for jobs that are not already embedded."""
     new_embeddings = {}
-    new_texts = []
-    new_ids = []
-
-    for idx, row in jobs_df.iterrows():
-        job_id = hash_job(row)
-        if job_id not in stored_embeddings:
-            # New job found
-            new_texts.append(row[text_column])
-            new_ids.append(job_id)
-
-    if new_texts:
-        print(f"Generating embeddings for {len(new_texts)} new jobs...")
-        batch_embeddings = generate_embeddings_batch(new_texts)
-        for job_id, embedding in zip(new_ids, batch_embeddings):
-            new_embeddings[job_id] = {"embedding": embedding, "data": row.to_dict()}
+    for _, job in jobs_df.iterrows():
+        job_id = hash_job(job)  # Use `hash_job` to uniquely identify the job
+        if job_id not in stored_embeddings:  # Check if embedding already exists
+            try:
+                job_embedding = generate_embeddings(job["description"])
+                new_embeddings[job_id] = {
+                    "embedding": job_embedding,
+                    "data": job.to_dict()  # Store the job data for ranking later
+                }
+            except Exception as e:
+                print(f"Error embedding job {job_id}: {e}")
 
     return new_embeddings
+
+
+
 
 # Rank jobs based on similarity
 def rank_jobs(resume_embedding, jobs_embeddings, text_column="description"):

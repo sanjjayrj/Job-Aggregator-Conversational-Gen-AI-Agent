@@ -29,15 +29,22 @@ def main(search_term="", location = "United States"):
     )
 
     # Drop unnecessary columns
-    jobs = jobs.drop(['id','site', 'salary_source','interval','job_level', 'job_function', 'listing_type', 'emails','company_industry','company_url', 'company_logo', 'company_url_direct', 'company_addresses', 'company_num_employees', 'company_revenue', 'company_description'], axis=1)
+    jobs = jobs.drop(['id','site', 'salary_source','interval','job_level', 'job_function',
+                      'listing_type', 'emails','company_industry','company_url',
+                      'company_logo', 'company_url_direct', 'company_addresses',
+                      'company_num_employees', 'company_revenue', 'company_description'], axis=1)
 
+    new_jobs = jobs # default if no file exists
     # Check if the output file exists
     if os.path.exists(output_file):
         # Read the existing file
         existing_jobs = pd.read_csv(output_file)
 
+        # Find new jobs (based on 'job_url' uniqueness)
+        new_jobs = jobs[~jobs['job_url'].isin(existing_jobs['job_url'])]
+
         # Concatenate the new jobs with existing jobs
-        all_jobs = pd.concat([existing_jobs, jobs], ignore_index=True)
+        all_jobs = pd.concat([existing_jobs, new_jobs], ignore_index=True)
 
         # Drop duplicate entries
         all_jobs = all_jobs.drop_duplicates()
@@ -53,5 +60,9 @@ def main(search_term="", location = "United States"):
         jobs.to_csv(output_file, index=False, quoting=csv.QUOTE_NONNUMERIC, escapechar="\\")
         print(f"Saved {len(jobs)} jobs to '{output_file}'.")
 
+    # Return the new jobs as a list of dictionaries
+    return new_jobs.to_dict(orient='records')
+
 if __name__ == "__main__":
-    main()
+    new_jobs = main()
+    print(f"Scraped {len(new_jobs)} new jobs.")
