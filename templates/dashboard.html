@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles/dashboard.css') }}">
+</head>
+
+<body>
+    <div class="dashboard">
+
+        <div class="sidebar">
+            <ul>
+                <li id="agent-btn" class="active">Agent</li>
+                <li id="resume-btn">Resume</li>
+                <li id="history-btn">Jobs History</li>
+            </ul>
+        </div>
+
+        <div class="main">
+            <div id="chat-area" class="content-area">
+                <div class="chat-window">
+                    <div class="chat-messages" id="chat-messages">
+                        <!-- Example chat messages -->
+                        <!-- User Message -->
+                        <div class="chat-message user-message">
+                            <img src="{{ url_for('static', filename='icons/user-icon.png') }}" alt="User" class="chat-icon">
+                            <p class="chat-text">Hello</p>
+                        </div>
+                        <!-- Assistant Message -->
+                        <div class="chat-message assistant-message">
+                            <img src="{{ url_for('static', filename='icons/assistant-icon.png') }}" alt="Assistant" class="chat-icon">
+                            <p class="chat-text">I'm here to help with job-related questions. Let me know how I can assist you.</p>
+                        </div>
+                    </div>
+                    <form action="/chat" method="POST" class="chat-input-container">
+                        <input type="text" name="message" class="chat-input" placeholder="Type a message..." required>
+                        <button type="submit" class="chat-send">Send</button>
+                    </form>
+                </div>
+
+                <div class="job-tiles" id="job-tiles">
+                </div>
+            </div>
+
+            <div id="resume-area" class="content-area hidden">
+                <form id="replace-form" action="/replace_resume" method="POST" enctype="multipart/form-data"
+                    class="replace-form">
+                    <label for="new_resume">Replace Resume:</label>
+                    <input type="file" id="new_resume" name="new_resume" required>
+                    <button type="submit" class="submit-button">Submit</button>
+                </form>
+                <div class="resume-container">
+                    <iframe id="resume-viewer" src="{{ url_for('uploaded_file', filename=resume_path) }}"
+                        frameborder="0"></iframe>
+                </div>
+            </div>
+            
+
+
+            <div id="history-area" class="content-area hidden">
+                <h2>Job History</h2>
+                <div id="history-list">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="job-details-modal" class="modal hidden">
+        <div class="modal-content">
+            <span class="close-button" onclick="closeModal()">&times;</span>
+            <h3 id="job-title"></h3>
+            <p id="job-company-location"></p>
+            <p id="job-description"></p>
+        </div>
+    </div>
+
+    <script>
+        const jobHistory = {{ job_history | tojson }};
+        let jobsDisplayed = false;
+
+        function loadTopJobs() {
+            console.log("Fetching top jobs...");
+
+            fetch('/get_top_jobs')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error("Failed to fetch top jobs.");
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log("Fetched jobs:", data.jobs); // Debug log
+                    const jobs = data.jobs;
+                    if (!jobs || jobs.length === 0) {
+                        console.error("No jobs available to display."); // Debug log
+                        return;
+                    }
+                    const jobTilesContainer = document.getElementById('job-tiles');
+                    jobTilesContainer.innerHTML = ''; // Clear existing tiles
+
+                    jobs.forEach((job, index) => {
+                        const jobTile = document.createElement('div');
+                        jobTile.className = 'job-tile';
+                        jobTile.innerHTML = `
+                    <h3>${job.title}</h3>
+                    <p><strong>Company:</strong> ${job.company}</p>
+                    <p><strong>Location:</strong> ${job.location}</p>
+                    <p><strong>Score:</strong> ${(job.similarity * 100).toFixed(2)}%</p>
+                    <button onclick="showJobDetails(${index}, ${JSON.stringify(job).replace(/"/g, '&quot;')})">View Details</button>
+                `;
+                        jobTilesContainer.appendChild(jobTile);
+                    });
+                })
+                .catch(error => {
+                    console.error("Error loading top jobs:", error); // Debug log
+                });
+        }
+
+        function pollStatus() {
+            fetch('/status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.scraping_complete && data.matching_complete && !jobsDisplayed) {
+                        loadTopJobs();
+                        jobsDisplayed = true;
+                    } else if (!data.scraping_complete || !data.matching_complete) {
+                        setTimeout(pollStatus, 1000); // Poll every second
+                    }
+                });
+        }
+
+        function loadJobHistory() {
+            const historyList = document.getElementById("history-list");
+            historyList.innerHTML = ""; // Clear existing job history
+
+            jobHistory.forEach((job, index) => {
+                const jobTile = document.createElement("div");
+                jobTile.className = "job-tile";
+                jobTile.innerHTML = `
+                    <h3>${job.title}</h3>
+                    <p><strong>Company:</strong> ${job.company}</p>
+                    <p><strong>Location:</strong> ${job.location}</p>
+                    <button onclick="showJobDetails(${index}, ${JSON.stringify(job).replace(/"/g, '&quot;')})">View Details</button>
+                `;
+                historyList.appendChild(jobTile);
+            });
+        }
+
+        function showJobDetails(index, job) {
+            document.getElementById("job-title").innerText = job.title;
+            document.getElementById("job-company-location").innerText = `${job.company} - ${job.location}`;
+            document.getElementById("job-description").innerText = job.description;
+            document.getElementById("job-details-modal").classList.remove("hidden");
+        }
+
+        function saveJobAndShowDetails(index) {
+            const job = jobs[index];
+
+            // Save the job to job history using an API
+            fetch('/save_job', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(job),
+            });
+
+            // Show job details
+            showJobDetails(index);
+        }
+
+        function closeModal() {
+                document.getElementById("job-details-modal").classList.add("hidden");
+        }
+
+        // Sidebar toggle functionality
+        document.addEventListener("DOMContentLoaded", () => {
+            const agentBtn = document.getElementById("agent-btn");
+            const resumeBtn = document.getElementById("resume-btn");
+            const historyBtn = document.getElementById("history-btn");
+            const chatArea = document.getElementById("chat-area");
+            const resumeArea = document.getElementById("resume-area");
+            const historyArea = document.getElementById("history-area");
+
+            // Show Chat Window (Default)
+            agentBtn.addEventListener("click", () => {
+                chatArea.classList.remove("hidden");
+                resumeArea.classList.add("hidden");
+                historyArea.classList.add("hidden");
+
+                agentBtn.classList.add("active");
+                resumeBtn.classList.remove("active");
+                historyBtn.classList.remove("active");
+            });
+
+            // Show Resume
+            resumeBtn.addEventListener("click", () => {
+                chatArea.classList.add("hidden");
+                resumeArea.classList.remove("hidden");
+                historyArea.classList.add("hidden");
+
+                resumeBtn.classList.add("active");
+                agentBtn.classList.remove("active");
+                historyBtn.classList.remove("active");
+            });
+
+            // Show Job History
+            historyBtn.addEventListener("click", () => {
+                chatArea.classList.add("hidden");
+                resumeArea.classList.add("hidden");
+                historyArea.classList.remove("hidden");
+
+                historyBtn.classList.add("active");
+                agentBtn.classList.remove("active");
+                resumeBtn.classList.remove("active");
+            });
+            loadTopJobs();
+            pollStatus();
+            loadJobHistory();
+            console.log("Job history:", jobHistory);
+        });
+
+
+        function appendMessage(sender, message) {
+            const chatMessages = document.getElementById("chat-messages");
+
+            // Create the container for the message
+            const messageDiv = document.createElement("div");
+            messageDiv.classList.add("chat-message");
+
+            // Add sender-specific styles
+            if (sender === "user") {
+                messageDiv.classList.add("user-message");
+                messageDiv.innerHTML = `
+                    <img src="/static/icons/user-icon.png" alt="User" class="chat-icon">
+                    <p class="chat-text">${message}</p>
+                `;
+            } else {
+                messageDiv.classList.add("assistant-message");
+                messageDiv.innerHTML = `
+                    <img src="/static/icons/assistant-icon.png" alt="Assistant" class="chat-icon">
+                    <p class="chat-text">${message}</p>
+                `;
+            }
+
+            // Append the message to the chat
+            chatMessages.appendChild(messageDiv);
+
+            // Scroll to the latest message
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        document.querySelector('.chat-input-container').addEventListener('submit', function (e) {
+            e.preventDefault(); // Prevent default form submission
+
+            const messageInput = document.querySelector('.chat-input');
+            const userMessage = messageInput.value;
+
+            if (!userMessage) return;
+
+            // Add user's message to the chat window
+            const chatMessages = document.getElementById('chat-messages');
+            appendMessage("user", userMessage);
+
+
+            // Send the user's message to the server
+            fetch('/chat', {
+                method: 'POST',
+                body: new URLSearchParams({ message: userMessage }),
+            })
+                .then(response => response.json())
+                .then(data => {
+                    // Add assistant's response to the chat
+                    const assistantMessage = data.message || "Error: Unable to get a response.";
+                    appendMessage("assistant", assistantMessage);
+                })
+                .catch(error => {
+                    console.error("Error:", error);
+                    appendMessage("assistant", "Sorry, something went wrong. Please try again.");
+                });
+
+            // Clear input field
+            messageInput.value = '';
+        });
+
+    </script>
+</body>
+</html>

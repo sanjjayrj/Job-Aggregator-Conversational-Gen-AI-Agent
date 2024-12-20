@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Preferences</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles/general.css') }}">
+</head>
+
+<body>
+    <div class="container">
+        <h1>Set Your Preferences</h1>
+        <form action="/preferences" method="POST">
+            <label for="job_location">Preferred Job Location:</label>
+            <input type="text" name="job_location" id="job_location" placeholder="e.g., Manhattan, NY" required>
+            <label for="job_role">Preferred Job Role:</label>
+            <input type="text" name="job_role" id="job_role" placeholder="e.g., Data Scientist" required>
+            <button type="submit">Submit Preferences</button>
+        </form>
+    </div>
+</body>
+
+</html>
