@@ -127,6 +127,7 @@ body {
     align-self: flex-end;
     background-color: #6200ea;
     color: #fff;
+    text-align: right;
 }
 
 /* Assistant Messages */
@@ -134,6 +135,7 @@ body {
     align-self: flex-start;
     background-color: #2e2e2e;
     color: #fff;
+    text-align: left;
 }
 
 /* Chat Icon */
