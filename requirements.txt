@@ -1,0 +1,16 @@
+PyMuPDF>=1.24.14
+numpy==1.26.3
+pandas
+spacy
+scikit-learn
+openai==0.28.0
+requests>=2.20
+tqdm>=4.0
+aiohttp>=3.0
+python-dotenv
+scikit-learn
+six==1.16.0
+python-jobspy==1.1.75
+flask>=3.1.0
+boto3
+awscli==1.36.15
