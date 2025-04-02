@@ -4,6 +4,7 @@
 
 This web application is a dynamic job recommendation platform where users can upload their resumes, set preferences, and get tailored job recommendations based on their skills and preferences. The platform uses OpenAI embeddings for matching jobs to resumes and integrates geographical proximity filtering to suggest relevant jobs near a user's specified location.
 
+![alt text](https://github.com/sanjjayrj/Job-Aggregator-Conversational-Gen-AI-Agent/blob/main/diagram.png?raw=true)
 ---
 
 ## Features
